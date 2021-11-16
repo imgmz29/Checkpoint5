@@ -124,13 +124,32 @@ module processor(
 	 /* necessary wire definition */
 	 reg [31:0] PC;
 	 wire processor_clock;
+	 
 	 // controller
-	 wire ALUinB, Rwe, Rwd, R_type, add, addi, sub, and1, or1, sll, sra, sw;
+	 wire ALUinB, Rwe, Rwd, R_type, add, addi, sub, and1, or1, sll, sra, sw, j, bne, jal, jr, blt, bex, setx;
+	 
+	 // Regfile
+	 wire [4:0] temp_ctrl_A, temp_ctrl_B, temp_ctrl_W, temp2_ctrl_W, temp2_ctrl_B;
+	 wire [31:0] sel_Rwd_out, sel_setx_out;
+	 
 	 // Alu
 	 wire isNotEqual, isLessThan;
 	 wire[4:0] ALUop;
 	 wire[4:0] ctrl_shiftamt;
+	 
+	 // J type
+	 wire [16:0] N;
+	 wire [31:0] ex_N;
+	 wire [26:0] T;
+	 wire [31:0] ex_T;
+	 wire sel_1_ctrl, sel_2_ctrl, sel_3_ctrl;
+	 wire [31:0] sel_1_out, sel_2_out, sel_3_out;
+	 
+	 
 	 /* necessary wire definition */
+	 
+	 
+	 
 	 
 	 /* PC clock update */
 	 //module pc (clk, reset, in, out);
@@ -148,7 +167,7 @@ module processor(
 			PC = 32'd0;
 		end
 		else begin
-			PC = PC + 32'd1;
+			PC = sel_3_out;
 		end
 	 end
 	 
@@ -159,15 +178,48 @@ module processor(
 	 assign address_imem = PC[11:0];
 	 
 	
+	
+	
 	 
 	 // get control code
-	 //module controller(q_imem, ALUinB, DMwe, Rwe, Rwd, zeroes, R_type, add, sub, and1, or1, sll, sra);
-	 controller contol_bit(q_imem, ALUinB, DMwe, Rwe, Rwd, R_type, add, addi, sub, and1, or1, sll, sra, sw);
+	 controller contol_bit(q_imem, ALUinB, DMwe, Rwe, Rwd, R_type, add, addi, sub, and1, or1, sll, sra, sw, j, bne, jal, jr, blt, bex, setx);
+	 
+	 
+	 
 	 
 	 /* Regfile */
+	 
+	 // ctrl_readA
+	 assign temp_ctrl_A = bex ? 5'd30 : q_imem[21:17];
+	 assign ctrl_readRegA = (jr | blt | bne) ? q_imem[26:22] : temp_ctrl_A;
+	 
+	 // ctrl_readB
+	 assign temp_ctrl_B = bex ? 5'd0 : q_imem[16:12];
+	 assign temp2_ctrl_B = (blt | bne) ? temp_ctrl_A : temp_ctrl_B;
+	 assign ctrl_readRegB = sw ? q_imem[26:22] : temp2_ctrl_B;
+	 
+	 // ctrl_write
+	 assign temp_ctrl_W = setx ? 5'd30 : q_imem[26:22];
+	 assign temp2_ctrl_W = jal ? 5'd31 : temp_ctrl_W;
+	 /* overflow */
+	 assign ctrl_writeReg = (overflow || q_imem == 32'd0) ? 5'b11110 : temp2_ctrl_W;
+	 
+	 
+	 // write_Enable
 	 assign ctrl_writeEnable = Rwe;
-	 assign ctrl_readRegA = q_imem[21:17];
-	 assign ctrl_readRegB = sw ? q_imem[26:22] : q_imem[16:12];
+	 
+	 assign write_data = ~overflow ? alu_result : ((add & overflow) ? 32'd1 : ((addi & overflow) ? 32'd2 : 32'd3));
+	 // Regfile write
+	 assign sel_Rwd_out = Rwd ? q_dmem : write_data;
+	 assign sel_setx_out = setx ? ex_T : sel_Rwd_out;
+	 // mark
+	 assign data_writeReg = jal ? PC + 32'd1 : sel_setx_out;
+
+
+	 
+	 
+	 
+	 
 	 
 	 /* ALU */
 	 assign immd = q_imem[16:0];
@@ -178,8 +230,31 @@ module processor(
 	 assign ctrl_shiftamt = R_type ? q_imem[11:7] : 5'b0;
 	 alu alu1(data_readRegA, data_operandB, ALUop, ctrl_shiftamt, alu_result, isNotEqual, isLessThan, overflow);
 	 
-	 /* overflow */
-	 assign ctrl_writeReg = (overflow || q_imem == 32'd0) ? 5'b11110 : q_imem[26:22];
+	 
+	 
+	 
+	 /* J type */
+	 
+	 // N and N extend
+	 assign N = q_imem[16:0];
+	 assign ex_N = {15'b0, N};
+	 // T and T extend
+	 assign T = q_imem[26:0];
+	 assign ex_T = {5'b0, T};
+	 
+	 // J type
+	 assign sel_1_ctrl = (isNotEqual & bex) | j | jal;
+	 assign sel_1_out = sel_1_ctrl ? ex_T : PC + 32'd1;
+	 
+	 assign sel_2_ctrl = (isLessThan & blt) | (isNotEqual & bne);
+	 assign sel_2_out = sel_2_ctrl ? 32'd1 + ex_N + PC : sel_1_out;
+	 
+	 assign sel_3_ctrl = jr;
+	 assign sel_3_out = sel_3_ctrl ? data_readRegA : sel_2_out;
+	 
+	 
+	 
+	 
 	 
 	 // Dmem
 	 // use a counter to read and write
@@ -197,14 +272,12 @@ module processor(
 	 assign wren = (counter == 3'b111) ? DMwe : 0;
 	 assign address_dmem = alu_result;
 	 assign data = data_readRegB;
+	 
+	 
+	 
 
 	 
 	 
-
-
-	 assign write_data = ~overflow ? alu_result : ((add & overflow) ? 32'd1 : ((addi & overflow) ? 32'd2 : 32'd3));
-	 // Regfile write
-	 assign data_writeReg = Rwd ? q_dmem : write_data;
 	 
 	 
 	 
