@@ -10,3 +10,5 @@ We used it both on our own skeleton.v and the provided skeleton_test.v.
 For our own skeleton.v, everything worked well.
 
 For skeleton_test.v, address_imem always returned to 0 after reaching 31.
+
+So we posted the result image of skeleton.v instead of the other one.
